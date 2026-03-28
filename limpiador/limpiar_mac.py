@@ -1,4 +1,3 @@
-
 """
 LIMPIADOR INTELIGENTE DE MAC
 ==============================
@@ -8,7 +7,7 @@ Nunca toca documentos, descargas organizadas, música, fotos ni iCloud.
 Modos de uso:
   python3 limpiar_mac.py            → Escanea y muestra qué limpiaría (seguro)
   python3 limpiar_mac.py --limpiar  → Escanea y limpia
-  python3 limpiar_mac.py --auto     → Solo limpia si hay más de 2 GB de basura (para automatización)
+  python3 limpiar_mac.py --auto     → Solo limpia si hay más de 2 GB de basura
 
 Autor: Santiago Jiménez
 """
@@ -18,23 +17,20 @@ import shutil
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple
+from typing import Any, Dict, List, Tuple
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────
 
-# Umbral para el modo --auto: solo limpia si hay más basura que esto
 UMBRAL_AUTO_GB = 2.0
 
-# Directorio de logs
-LOG_DIR = Path(__file__).parent.parent / "logs"
+LOG_DIR  = Path(__file__).parent.parent / "logs"
 LOG_FILE = LOG_DIR / "limpieza.log"
 
 HOME = Path.home()
 
-# ── Zonas a limpiar (SOLO caché y temporales, regenerables automáticamente) ──
-ZONAS_LIMPIEZA = [
+ZONAS_LIMPIEZA: List[Dict[str, Any]] = [
     {
         "nombre":      "Caché de aplicaciones",
         "ruta":        HOME / "Library/Caches",
@@ -85,8 +81,7 @@ ZONAS_LIMPIEZA = [
     },
 ]
 
-# ── Zonas BLINDADAS: nunca se tocan ──
-ZONAS_PROTEGIDAS = [
+ZONAS_PROTEGIDAS: List[Path] = [
     HOME / "Downloads",
     HOME / "Documents",
     HOME / "Desktop",
@@ -95,7 +90,7 @@ ZONAS_PROTEGIDAS = [
     HOME / "Music/iTunes/iTunes Library.itl",
     HOME / "Music/iTunes/iTunes Music",
     HOME / "Music/Music",
-    HOME / "Library/Mobile Documents",        # iCloud Drive
+    HOME / "Library/Mobile Documents",
     HOME / "Library/Application Support",
     HOME / "Library/Keychains",
     HOME / "Library/Preferences",
@@ -106,12 +101,14 @@ ZONAS_PROTEGIDAS = [
 # UTILIDADES
 # ─────────────────────────────────────────────────────────────
 
-def tamaño_legible(bytes_: int) -> str:
+def tamaño_legible(bytes_: float) -> str:
+    """Convierte bytes a una cadena legible (KB, MB, GB...)."""
+    valor = float(bytes_)
     for unidad in ["B", "KB", "MB", "GB"]:
-        if bytes_ < 1024:
-            return f"{bytes_:.1f} {unidad}"
-        bytes_ /= 1024
-    return f"{bytes_:.1f} TB"
+        if valor < 1024:
+            return f"{valor:.1f} {unidad}"
+        valor /= 1024
+    return f"{valor:.1f} TB"
 
 
 def tamaño_carpeta(ruta: Path) -> int:
@@ -130,7 +127,7 @@ def tamaño_carpeta(ruta: Path) -> int:
 
 
 def esta_protegida(ruta: Path) -> bool:
-    """Comprueba si una ruta está dentro de una zona blindada."""
+    """Devuelve True si la ruta está dentro de una zona blindada."""
     ruta_abs = ruta.resolve()
     for protegida in ZONAS_PROTEGIDAS:
         try:
@@ -141,15 +138,15 @@ def esta_protegida(ruta: Path) -> bool:
     return False
 
 
-def espacio_disco() -> tuple[int, int]:
+def espacio_disco() -> Tuple[int, int]:
     """Devuelve (usado, total) en bytes."""
     stat = shutil.disk_usage(HOME)
     return stat.used, stat.total
 
 
-def escribir_log(mensaje: str):
+def escribir_log(mensaje: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {mensaje}\n")
 
 
@@ -157,17 +154,14 @@ def escribir_log(mensaje: str):
 # ESCANEO
 # ─────────────────────────────────────────────────────────────
 
-def escanear() -> list[dict]:
+def escanear() -> List[Dict[str, Any]]:
     """Escanea las zonas y devuelve una lista con lo que hay que limpiar."""
-    resultados = []
+    resultados: List[Dict[str, Any]] = []
 
     for zona in ZONAS_LIMPIEZA:
-        ruta = zona["ruta"]
+        ruta: Path = zona["ruta"]
 
-        if not ruta.exists():
-            continue
-
-        if esta_protegida(ruta):
+        if not ruta.exists() or esta_protegida(ruta):
             continue
 
         if zona["tipo"] == "directorio_contenido":
@@ -182,9 +176,7 @@ def escanear() -> list[dict]:
                 })
 
         elif zona["tipo"] == "ds_store":
-            archivos = list(ruta.rglob(".DS_Store"))
-            # Filtrar los que estén en zonas protegidas
-            archivos = [a for a in archivos if not esta_protegida(a)]
+            archivos = [a for a in ruta.rglob(".DS_Store") if not esta_protegida(a)]
             bytes_zona = sum(a.stat().st_size for a in archivos if a.exists())
             if archivos:
                 resultados.append({
@@ -203,9 +195,9 @@ def escanear() -> list[dict]:
 # LIMPIEZA
 # ─────────────────────────────────────────────────────────────
 
-def limpiar_zona(zona: dict) -> int:
+def limpiar_zona(zona: Dict[str, Any]) -> int:
     """Limpia una zona y devuelve los bytes liberados."""
-    ruta = zona["ruta"]
+    ruta: Path = zona["ruta"]
     liberados = 0
 
     try:
@@ -214,21 +206,21 @@ def limpiar_zona(zona: dict) -> int:
                 if esta_protegida(item):
                     continue
                 try:
-                    tamaño = tamaño_carpeta(item) if item.is_dir() else item.stat().st_size
+                    tam = tamaño_carpeta(item) if item.is_dir() else item.stat().st_size
                     if item.is_dir():
                         shutil.rmtree(item, ignore_errors=True)
                     else:
                         item.unlink(missing_ok=True)
-                    liberados += tamaño
+                    liberados += tam
                 except (PermissionError, OSError):
                     pass
 
         elif zona["tipo"] == "ds_store":
             for archivo in zona.get("archivos", []):
                 try:
-                    tamaño = archivo.stat().st_size
+                    tam = archivo.stat().st_size
                     archivo.unlink(missing_ok=True)
-                    liberados += tamaño
+                    liberados += tam
                 except (PermissionError, OSError):
                     pass
 
@@ -238,22 +230,15 @@ def limpiar_zona(zona: dict) -> int:
     return liberados
 
 
-def limpiar_homebrew() -> int:
+def limpiar_homebrew() -> None:
     """Limpia la caché de descargas de Homebrew."""
     try:
-        resultado = subprocess.run(
+        subprocess.run(
             ["/opt/homebrew/bin/brew", "cleanup", "--prune=0", "-s"],
             capture_output=True, text=True, timeout=60
         )
-        # Intentar leer cuánto liberó del output
-        for linea in resultado.stdout.splitlines():
-            if "freed" in linea.lower() or "liberado" in linea.lower():
-                pass
-        # Calcular tamaño del cache antes de limpiar
-        cache_brew = Path(os.environ.get("HOME", "")) / "Library/Caches/Homebrew"
-        return 0  # brew cleanup no reporta bytes fácilmente, se incluye en caché general
     except Exception:
-        return 0
+        pass
 
 
 def vaciar_papelera() -> int:
@@ -266,7 +251,6 @@ def vaciar_papelera() -> int:
             capture_output=True, timeout=30
         )
     except Exception:
-        # Fallback manual
         for item in papelera.iterdir():
             try:
                 if item.is_dir():
@@ -282,11 +266,10 @@ def vaciar_papelera() -> int:
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     modo_limpiar = "--limpiar" in sys.argv
     modo_auto    = "--auto"    in sys.argv
-
-    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ahora        = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     print()
     print("╔══════════════════════════════════════════════════╗")
@@ -294,77 +277,66 @@ def main():
     print(f"║      {ahora:<45}║")
     print("╚══════════════════════════════════════════════════╝\n")
 
-    # ── Estado del disco ──
     usado, total = espacio_disco()
     libre = total - usado
     porcentaje_usado = (usado / total) * 100
-    print(f"💾 Disco:  {tamaño_legible(total)} total")
-    print(f"   Usado:  {tamaño_legible(usado)} ({porcentaje_usado:.1f}%)")
-    print(f"   Libre:  {tamaño_legible(libre)}\n")
+    print(f"Disco:  {tamaño_legible(total)} total")
+    print(f"Usado:  {tamaño_legible(usado)} ({porcentaje_usado:.1f}%)")
+    print(f"Libre:  {tamaño_legible(libre)}\n")
 
-    # ── Escaneo ──
-    print("🔍 Escaneando zonas seguras...\n")
+    print("Escaneando zonas seguras...\n")
     zonas = escanear()
-
-    # Papelera
     bytes_papelera = tamaño_carpeta(HOME / ".Trash")
-
-    total_bytes = sum(z["bytes"] for z in zonas) + bytes_papelera
-    total_gb    = total_bytes / (1024 ** 3)
+    total_bytes    = sum(int(z["bytes"]) for z in zonas) + bytes_papelera
+    total_gb       = total_bytes / (1024 ** 3)
 
     if not zonas and bytes_papelera == 0:
-        print("✅ El Mac está limpio, no hay nada que eliminar.\n")
+        print("El Mac esta limpio, no hay nada que eliminar.\n")
         escribir_log("Escaneo completado — nada que limpiar")
         return
 
-    # ── Mostrar lo encontrado ──
     print("─" * 52)
     print(f"  {'ZONA':<35} {'TAMAÑO':>10}")
     print("─" * 52)
     for zona in zonas:
-        print(f"  📁 {zona['nombre']:<33} {tamaño_legible(zona['bytes']):>10}")
+        print(f"  {zona['nombre']:<35} {tamaño_legible(zona['bytes']):>10}")
         print(f"     {zona['descripcion']}")
     if bytes_papelera > 0:
-        print(f"  🗑️  Papelera                          {tamaño_legible(bytes_papelera):>10}")
+        print(f"  Papelera                              {tamaño_legible(bytes_papelera):>10}")
     print("─" * 52)
     print(f"  {'TOTAL RECUPERABLE':<35} {tamaño_legible(total_bytes):>10}")
     print("─" * 52)
 
-    # ── Lógica de modo ──
     if modo_auto:
         if total_gb < UMBRAL_AUTO_GB:
-            print(f"\n💡 Modo automático: {total_gb:.2f} GB < {UMBRAL_AUTO_GB} GB de umbral.")
-            print("   No es necesario limpiar todavía. ¡El Mac va bien!\n")
-            escribir_log(f"Auto: {tamaño_legible(total_bytes)} de basura — por debajo del umbral, sin limpiar")
+            print(f"\nModo automatico: {total_gb:.2f} GB por debajo del umbral de {UMBRAL_AUTO_GB} GB.")
+            print("   No es necesario limpiar. El Mac va bien!\n")
+            escribir_log(f"Auto: {tamaño_legible(total_bytes)} — por debajo del umbral, sin limpiar")
             return
         else:
-            print(f"\n⚡ Modo automático: {total_gb:.2f} GB supera el umbral. Limpiando...\n")
+            print(f"\nModo automatico: {total_gb:.2f} GB supera el umbral. Limpiando...\n")
             modo_limpiar = True
 
     if not modo_limpiar:
-        print(f"\n👆 Modo escaneo (sin borrar nada).")
+        print(f"\nModo escaneo (sin borrar nada).")
         print(f"   Para limpiar ejecuta: python3 limpiar_mac.py --limpiar\n")
         return
 
-    # ── Limpieza ──
-    print("\n🧹 Limpiando...\n")
+    print("\nLimpiando...\n")
     total_liberado = 0
 
     for zona in zonas:
         liberados = limpiar_zona(zona)
         total_liberado += liberados
-        print(f"  ✓  {zona['nombre']:<35} {tamaño_legible(liberados):>10}")
+        print(f"  OK  {zona['nombre']:<35} {tamaño_legible(liberados):>10}")
 
-    # Papelera
     if bytes_papelera > 0:
         liberados_papelera = vaciar_papelera()
         total_liberado += liberados_papelera
-        print(f"  ✓  Papelera vaciada                   {tamaño_legible(liberados_papelera):>10}")
+        print(f"  OK  Papelera vaciada                   {tamaño_legible(liberados_papelera):>10}")
 
-    # Homebrew
     limpiar_homebrew()
 
-    # ── Resultado final ──
     usado_nuevo, _ = espacio_disco()
     libre_nuevo = total - usado_nuevo
 
@@ -372,10 +344,10 @@ def main():
     print("╔══════════════════════════════════════════════════╗")
     print("║  RESULTADO                                       ║")
     print("╠══════════════════════════════════════════════════╣")
-    print(f"║  🧹 Espacio liberado:  {tamaño_legible(total_liberado):<27}║")
-    print(f"║  💾 Espacio libre ahora: {tamaño_legible(libre_nuevo):<25}║")
+    print(f"║  Espacio liberado:   {tamaño_legible(total_liberado):<29}║")
+    print(f"║  Espacio libre ahora: {tamaño_legible(libre_nuevo):<28}║")
     print("╚══════════════════════════════════════════════════╝")
-    print("\n✅ ¡Mac limpio y optimizado!\n")
+    print("\nMac limpio y optimizado!\n")
 
     escribir_log(
         f"Limpieza completada — liberado: {tamaño_legible(total_liberado)} | "
