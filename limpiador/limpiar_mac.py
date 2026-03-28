@@ -1,3 +1,4 @@
+
 """
 LIMPIADOR INTELIGENTE DE MAC
 ==============================
@@ -12,12 +13,12 @@ Modos de uso:
 Autor: Santiago Jiménez
 """
 
-import os
 import sys
 import shutil
 import subprocess
 from pathlib import Path
 from datetime import datetime
+from typing import Tuple
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
